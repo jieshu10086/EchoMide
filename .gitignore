@@ -5,3 +5,9 @@ dist/
 .DS_Store
 *.log
 .env
+
+# 大体积二进制文档（作品说明 PDF 等）不进仓库，避免把仓库撑大
+*.pdf
+
+# 临时产物
+tmp.html

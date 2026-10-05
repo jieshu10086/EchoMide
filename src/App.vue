@@ -1,591 +1,498 @@
 <template>
-  <main :class="['app-shell', `app-shell-${activeView}`]">
+  <div class="app">
     <header class="topbar">
-      <a class="brand" href="#" aria-label="EchoMind 首页" @click.prevent="activeView = 'chat'">
-        <span class="brand-mark">E</span>
-        <span class="brand-name">EchoMind</span>
-      </a>
-
-      <nav class="view-nav" aria-label="工作区">
-        <button :class="{ active: activeView === 'chat' }" @click="activeView = 'chat'">对话</button>
-        <button :class="{ active: activeView === 'knowledge' }" @click="activeView = 'knowledge'">知识库</button>
-        <button :class="{ active: activeView === 'evaluation' }" @click="activeView = 'evaluation'">评测</button>
-      </nav>
-
-      <div class="topbar-tools">
-        <span class="environment-pill">
-          <i :class="healthOk ? 'online' : 'offline'"></i>
-          {{ currentBackend.label }}
-        </span>
-        <a class="docs-link" :href="docsUrl" target="_blank" rel="noreferrer">API 文档</a>
-        <button class="avatar-button" title="当前用户">{{ userInitial }}</button>
-      </div>
-    </header>
-
-    <div v-if="toast" class="toast" role="status">{{ toast }}</div>
-
-    <section v-if="activeView === 'chat'" class="page page-chat">
-      <div class="page-heading">
-        <div class="heading-copy">
-          <span class="kicker">Conversation lab</span>
-          <h1>和客服 Agent 对话</h1>
-          <p>发送一条真实请求，查看它如何识别意图、选择 Agent 并生成回复。</p>
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark">EM</div>
+          <div class="brand-text">
+            <h1>EchoMind</h1>
+            <p>智能客服对话台</p>
+          </div>
         </div>
-        <div class="heading-actions">
-          <span class="session-label">{{ settings.conversationId || '新会话' }}</span>
-          <button class="quiet-button" @click="clearConversation">清空</button>
+
+        <div class="topbar-actions">
+          <button
+            class="conn"
+            :class="healthOk ? 'is-online' : 'is-offline'"
+            :title="`点击重新检测 · ${healthLabel}`"
+            @click="checkHealth"
+          >
+            <span class="conn-dot" aria-hidden="true"></span>
+            <span class="conn-text">{{ healthOk ? '服务已连接' : '服务未连接' }}</span>
+          </button>
+
+          <button class="ghost-btn" :class="{ active: settingsOpen }" @click="settingsOpen = !settingsOpen">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 7h9M17 7h3M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              <circle cx="15" cy="7" r="2.2" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="10" cy="17" r="2.2" stroke="currentColor" stroke-width="1.8" />
+            </svg>
+            设置
+          </button>
         </div>
       </div>
 
-      <div class="chat-layout">
-        <section class="chat-stage">
-          <div class="stage-bar">
-            <div class="stage-context">
-              <span class="context-dot"></span>
-              <span>{{ currentBackend.baseUrl }}</span>
-            </div>
-            <span>{{ messages.length }} 条消息</span>
-          </div>
-
-          <div class="messages" ref="messageList">
-            <article v-for="item in messages" :key="item.id" :class="['message', item.role]">
-              <div class="message-meta">
-                <span>{{ item.role === 'user' ? '你' : currentBackend.label + ' Agent' }}</span>
-                <small v-if="item.meta">{{ item.meta }}</small>
+      <transition name="drop">
+        <section v-if="settingsOpen" class="settings">
+          <div class="settings-inner">
+            <header class="settings-head">
+              <div>
+                <h2>连接设置</h2>
+                <p>
+                  当前后端固定为 Python 版（支持 SSE 流式输出）· 实际请求地址
+                  <code>{{ currentBackend.baseUrl }}</code>
+                </p>
               </div>
-              <p>{{ item.content }}</p>
-              <div v-if="item.trace" class="message-trace">
-                <div class="trace-head">
-                  <span>工具调用</span>
-                  <small v-if="item.trace.requestId">#{{ item.trace.requestId }}</small>
-                </div>
-                <div v-if="item.trace.toolCalls?.length" class="trace-calls">
-                  <details v-for="(call, index) in item.trace.toolCalls" :key="`${item.id}-${index}`" open>
-                    <summary>
-                      <strong>{{ call.tool_name || 'unknown_tool' }}</strong>
-                      <span>{{ call.success ? '成功' : '失败' }}</span>
-                    </summary>
-                    <pre>{{ formatJson(call.input || {}) }}</pre>
-                  </details>
-                </div>
-                <div v-else class="trace-empty-block">
-                  <p>本次请求已生成 trace，但没有可展示的工具输入。</p>
-                  <p v-if="item.trace.toolsUsed?.length" class="trace-note">已调用：{{ item.trace.toolsUsed.join(' · ') }}</p>
-                </div>
-              </div>
-            </article>
+              <button class="ghost-btn small" :disabled="testingConnection" @click="checkHealth">
+                {{ testingConnection ? '检测中…' : '测试连接' }}
+              </button>
+            </header>
 
-            <div v-if="messages.length === 0" class="empty-state">
-              <div class="empty-symbol">✦</div>
-              <h2>从一个客户问题开始</h2>
-              <p>下面的快捷问题只是起点，你也可以直接输入自己的测试用例。</p>
-              <div class="starter-prompts">
-                <button @click="usePrompt('我想申请退款，订单号是 #12345')">退款申请</button>
-                <button @click="usePrompt('登录时提示错误，应该怎么排查？')">技术排查</button>
-                <button @click="usePrompt('发票多久可以开具？')">发票咨询</button>
-              </div>
-            </div>
-          </div>
-
-          <form class="composer" @submit.prevent="sendMessage">
-            <textarea
-              v-model="draft"
-              rows="3"
-              placeholder="输入消息..."
-              @keydown.meta.enter.prevent="sendMessage"
-              @keydown.ctrl.enter.prevent="sendMessage"
-            ></textarea>
-            <div class="composer-bottom">
-              <span>⌘ / Ctrl + Enter 发送</span>
-              <button type="submit" :disabled="busy || !draft.trim()">{{ busy ? '处理中' : '发送' }}</button>
-            </div>
-          </form>
-        </section>
-
-        <aside class="chat-sidebar" ref="sidebarRef">
-          <div class="chat-sidebar-scroll">
-            <section class="side-card session-card">
-              <div class="card-heading">
-                <div>
-                  <span class="kicker">Session</span>
-                  <h2>会话信息</h2>
-                </div>
-                <span class="status-copy muted">{{ settings.conversationId ? '已启用' : '新会话' }}</span>
-              </div>
-              <div class="session-grid">
-                <div>
-                  <span>会话 ID</span>
-                  <strong>{{ settings.conversationId || '自动生成' }}</strong>
-                </div>
-                <div>
-                  <span>用户 ID</span>
-                  <strong>{{ settings.userId || 'anonymous' }}</strong>
-                </div>
-              </div>
-            </section>
-
-            <section class="side-card connection-card">
-              <div class="card-heading">
-                <div>
-                  <span class="kicker">Connection</span>
-                  <h2>连接配置</h2>
-                </div>
-                <span class="status-copy" :class="healthOk ? 'success' : 'muted'">{{ healthLabel }}</span>
-              </div>
-
-              <div class="backend-tabs">
-                <button :class="{ active: settings.backend === 'java' }" @click="switchBackend('java')">Java</button>
-                <button :class="{ active: settings.backend === 'python' }" @click="switchBackend('python')">Python</button>
-              </div>
-
-              <label>
+            <div class="settings-grid">
+              <label class="field">
+                <span>Python API 地址</span>
+                <input v-model="settings.endpoints.python" @change="onEndpointChange" placeholder="/api/python" />
+              </label>
+              <label class="field">
                 <span>用户 ID</span>
                 <input v-model="settings.userId" @change="persist" placeholder="u1001" />
               </label>
-              <label>
+              <label class="field">
                 <span>会话 ID</span>
-                <input v-model="settings.conversationId" @change="persist" placeholder="自动生成" />
+                <input v-model="settings.conversationId" placeholder="留空则由后端自动生成" />
               </label>
-              <div class="side-actions">
-                <button @click="checkHealth">检查连接</button>
-                <button class="quiet-button" @click="refreshConsole">刷新</button>
-              </div>
-            </section>
+              <label class="field">
+                <span>空闲切会话阈值</span>
+                <span class="input-affix">
+                  <input v-model.number="settings.idleMinutes" type="number" min="1" max="240" @change="persist" />
+                  <em>分钟</em>
+                </span>
+              </label>
+            </div>
 
-            <section class="side-card trace-card">
-              <div class="card-heading">
-                <div>
-                  <span class="kicker">Last trace</span>
-                  <h2>最近一次请求</h2>
-                </div>
-                <span class="trace-status" :class="lastResponse ? 'has-data' : ''"></span>
-              </div>
-
-              <div v-if="lastResponse" class="trace-body">
-                <div class="latency">
-                  <span>响应耗时</span>
-                  <strong>{{ lastResponse.latencyMs || '-' }}<small> ms</small></strong>
-                </div>
-                <dl class="detail-list">
-                  <div><dt>主 Agent</dt><dd>{{ lastResponse.primaryAgent || lastResponse.agentType || '-' }}</dd></div>
-                  <div><dt>意图</dt><dd>{{ lastResponse.intent || '-' }}</dd></div>
-                  <div><dt>置信度</dt><dd>{{ formatPercent(lastResponse.routingConfidence) }}</dd></div>
-                  <div><dt>知识库</dt><dd :class="lastResponse.knowledgeUsed ? 'success' : 'muted'">{{ lastResponse.knowledgeUsed ? '已使用' : '未使用' }}</dd></div>
-                  <div><dt>转人工</dt><dd :class="lastResponse.escalated ? 'danger' : 'muted'">{{ lastResponse.escalated ? '是' : '否' }}</dd></div>
-                </dl>
-                <p v-if="lastResponse.routingReason" class="routing-reason">{{ lastResponse.routingReason }}</p>
-                <div v-if="lastTrace?.trace" class="trace-call-list">
-                  <div class="trace-call-title">工具调用</div>
-                  <div v-for="(call, index) in lastTrace.trace.toolCalls" :key="`${call.tool_use_id || index}`" class="trace-call-item">
-                    <div class="trace-call-meta">
-                      <strong>{{ call.tool_name || 'unknown_tool' }}</strong>
-                      <span>{{ call.latency_ms || 0 }} ms</span>
-                    </div>
-                    <pre>{{ formatJson(call.input || {}) }}</pre>
-                  </div>
-                  <div v-if="!lastTrace.trace.toolCalls?.length" class="trace-empty-block">
-                    <p>这次 trace 没有记录到工具输入。</p>
-                    <p v-if="lastTrace.trace.toolsUsed?.length" class="trace-note">已调用：{{ lastTrace.trace.toolsUsed.join(' · ') }}</p>
-                  </div>
-                </div>
-              </div>
-              <p v-else class="side-empty">发送消息后，这里会显示 Agent 路由、意图和耗时。</p>
-            </section>
-
-            <section class="side-card monitor-card">
-              <div class="card-heading">
-                <div>
-                  <span class="kicker">Runtime</span>
-                  <h2>运行状态</h2>
-                </div>
-                <button class="link-button" @click="loadMonitor">刷新</button>
-              </div>
-              <div class="mini-stats">
-                <div><strong>{{ totalRequests }}</strong><span>请求</span></div>
-                <div><strong>{{ agentCount }}</strong><span>Agent</span></div>
-                <div><strong>{{ activeAlerts.length }}</strong><span>告警</span></div>
-              </div>
-              <div v-if="activeAlerts.length" class="alert-note">{{ activeAlerts[0].detail || activeAlerts[0].title }}</div>
-              <p v-else class="healthy-note">当前没有活跃告警。</p>
-            </section>
-          </div>
-        </aside>
-      </div>
-    </section>
-
-    <section v-else-if="activeView === 'knowledge'" class="page page-knowledge">
-      <div class="page-heading">
-        <div class="heading-copy">
-          <span class="kicker">Knowledge operations</span>
-          <h1>知识库</h1>
-          <p>搜索、补充和维护客服 Agent 使用的知识片段。</p>
-        </div>
-        <div class="count-display"><strong>{{ knowledgeCount }}</strong><span>chunks</span></div>
-      </div>
-
-      <div class="knowledge-layout">
-        <section class="workspace-card search-workspace">
-          <div class="card-heading">
-            <div><span class="kicker">Retrieval</span><h2>检索知识</h2></div>
-            <code>POST /search</code>
-          </div>
-          <div class="search-line">
-            <input v-model="searchQuery" placeholder="例如：退款多久到账" @keydown.enter="searchKnowledge" />
-            <button @click="searchKnowledge" :disabled="busy || !searchQuery.trim()">搜索</button>
-          </div>
-          <div v-if="searchResults.length" class="result-list">
-            <article v-for="(item, index) in searchResults" :key="item.id || item.title || index" class="result-item">
-              <span class="result-number">{{ String(index + 1).padStart(2, '0') }}</span>
-              <div>
-                <div class="result-title"><strong>{{ item.title || '未命名文档' }}</strong><small>score {{ item.score ?? '-' }}</small></div>
-                <p>{{ item.content }}</p>
-              </div>
-            </article>
-          </div>
-          <div v-else class="workspace-empty">输入客户问题开始搜索。</div>
-        </section>
-
-        <section class="workspace-card import-workspace">
-          <div class="card-heading">
-            <div><span class="kicker">Ingestion</span><h2>添加知识</h2></div>
-            <code>ChromaDB</code>
-          </div>
-          <label><span>标题</span><input v-model="docTitle" placeholder="退款补充政策" /></label>
-          <label><span>内容</span><textarea v-model="docContent" rows="7" placeholder="输入客服规范、产品说明或排障流程"></textarea></label>
-          <div class="side-actions">
-            <button @click="submitKnowledge" :disabled="busy || !docTitle.trim() || !docContent.trim()">添加文档</button>
-            <label class="upload-button">上传文件<input type="file" accept=".txt,.md,.json" @change="handleUpload" /></label>
+            <label class="toggle">
+              <input type="checkbox" v-model="settings.streamEnabled" @change="persist" />
+              <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+              <span class="toggle-text">
+                <strong>流式输出（SSE）</strong>
+                <small>逐字返回回答；上游不支持时自动降级为一次性返回</small>
+              </span>
+            </label>
           </div>
         </section>
-      </div>
+      </transition>
+    </header>
 
-      <section class="workspace-card skills-workspace">
-        <div class="card-heading">
-          <div><span class="kicker">Loaded skills</span><h2>已加载能力</h2></div>
-          <button class="link-button" @click="reloadSkillSet">重新加载</button>
-        </div>
-        <div class="skill-table">
-          <div v-for="skill in skillsData.skills" :key="skill.name" class="skill-item">
-            <span class="skill-dot"></span><strong>{{ skill.name }}</strong><span>{{ skill.description || '业务规范能力' }}</span><small>{{ skill.content_chars || 0 }} chars</small>
-          </div>
-          <div v-if="!skillsData.skills.length" class="workspace-empty">暂无已加载 Skill。</div>
-        </div>
-      </section>
-    </section>
-
-    <section v-else class="page page-evaluation">
-      <div class="page-heading">
-        <div class="heading-copy">
-          <span class="kicker">Evaluation lab</span>
-          <h1>评测 Agent</h1>
-          <p>运行 FastAPI 内置评测，查看意图识别、对话质量和回归结果。</p>
-        </div>
-        <button @click="runEvaluation" :disabled="busy">{{ busy ? '运行中...' : '运行评测' }}</button>
-      </div>
-
-      <div v-if="evalData" class="evaluation-content">
-        <div class="evaluation-summary">
-          <div class="score-hero"><span>Pass rate</span><strong>{{ formatPercent(evalData.pass_rate) }}</strong><small>{{ evalData.passed }} / {{ evalData.total }} cases passed</small></div>
-          <div><span>通过</span><strong>{{ evalData.passed }}</strong></div>
-          <div><span>总数</span><strong>{{ evalData.total }}</strong></div>
-          <div><span>回归</span><strong :class="evalData.regressions?.length ? 'danger' : 'success'">{{ evalData.regressions?.length || 0 }}</strong></div>
-        </div>
-        <div class="evaluation-layout">
-          <section class="workspace-card">
-            <div class="card-heading"><div><span class="kicker">Scores</span><h2>平均评分</h2></div></div>
-            <div class="score-list">
-              <div v-for="(value, key) in evalData.avg_scores" :key="key"><span>{{ key }}</span><i><b :style="{ width: `${Math.min(Number(value) * 10, 100)}%` }"></b></i><strong>{{ Number(value).toFixed(2) }}</strong></div>
+    <main class="chat">
+      <div class="stream" ref="messageList">
+        <div class="stream-inner">
+          <section v-if="messages.length === 0" class="welcome">
+            <div class="welcome-mark">EM</div>
+            <h2>你好，我是 EchoMind 智能客服</h2>
+            <p>基于意图识别、RAG 知识检索与多 Agent 路由，为你处理退款、技术与账户类问题。</p>
+            <div class="suggestions">
+              <button v-for="item in suggestions" :key="item" class="suggestion" @click="useSuggestion(item)">
+                {{ item }}
+              </button>
             </div>
           </section>
-          <section class="workspace-card">
-            <div class="card-heading"><div><span class="kicker">Recommendations</span><h2>优化建议</h2></div></div>
-            <div v-if="evalData.recommendations?.length" class="recommendations"><p v-for="(item, index) in evalData.recommendations" :key="index">{{ item }}</p></div>
-            <div v-else class="workspace-empty">本次评测没有返回额外建议。</div>
-          </section>
+
+          <template v-else>
+            <article
+              v-for="item in messages"
+              :key="item.id"
+              :class="['msg', item.role, { streaming: item.streaming }]"
+            >
+              <template v-if="item.role === 'system'">
+                <span class="divider-note">{{ item.content }}</span>
+              </template>
+
+              <template v-else>
+                <div class="avatar" :class="item.role" aria-hidden="true">
+                  {{ item.role === 'user' ? '我' : 'EM' }}
+                </div>
+                <div class="msg-body">
+                  <div class="msg-head">
+                    <span class="who">{{ roleLabel(item) }}</span>
+                    <div v-if="item.meta" class="chips">
+                      <span v-for="chip in metaChips(item.meta)" :key="chip" class="chip">{{ chip }}</span>
+                    </div>
+                  </div>
+
+                  <div v-if="item.content" class="md" v-html="renderMarkdown(item.content)"></div>
+                  <div v-else-if="item.streaming" class="waiting">
+                    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    {{ item.phase || '正在生成…' }}
+                  </div>
+                </div>
+              </template>
+            </article>
+          </template>
         </div>
       </div>
-      <div v-else class="evaluation-empty"><div class="empty-symbol">◎</div><h2>还没有评测结果</h2><p>点击右上角运行一次评测。</p></div>
-    </section>
-  </main>
+
+      <div class="composer-bar">
+        <div class="composer-inner">
+          <form class="composer" @submit.prevent="sendMessage">
+            <textarea
+              ref="composerInput"
+              v-model="draft"
+              rows="1"
+              placeholder="输入你的问题…"
+              @input="autoGrow"
+              @compositionstart="onCompositionStart"
+              @compositionend="onCompositionEnd"
+              @keydown.enter.exact="onComposerKeydown"
+              @keydown.meta.enter="onComposerKeydown"
+              @keydown.ctrl.enter="onComposerKeydown"
+            ></textarea>
+
+            <div class="composer-side">
+              <button class="ghost-btn small" type="button" :disabled="busy" @click="startNewSession">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
+                </svg>
+                新会话
+              </button>
+              <button class="send-btn" :disabled="busy || !draft.trim()" :title="sendLabel">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3.4 20.4 21 12 3.4 3.6l2.5 7.1L14 12l-8.1 1.3z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+          </form>
+
+          <p class="composer-hint">
+            <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行<span v-if="streamActive"> · 正在流式接收…</span>
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  addKnowledge,
   backendMeta,
   createInitialSettings,
-  reloadSkills,
+  idleTimeoutMs,
   requestChat,
+  requestChatStream,
   requestHealth,
-  requestKnowledgeStats,
-  requestMonitor,
-  requestSearch,
-  requestToolTrace,
-  requestSkills,
-  runEvaluation as requestEvaluation,
+  resetSession,
   saveSettings,
-  uploadKnowledge
+  shouldRotateSession,
+  supportsStreaming
 } from './lib/backends'
+import { renderMarkdown } from './lib/markdown'
+
+const suggestions = [
+  '退款多久能到账？',
+  '订单 #12345 我想申请退款',
+  '账号登录不上，提示 401 错误',
+  '你们的技术支持电话是多少？'
+]
 
 const settings = reactive(createInitialSettings())
 const activeView = ref('chat')
 const messages = ref([])
 const draft = ref('')
 const busy = ref(false)
+const streamActive = ref(false)
+const settingsOpen = ref(false)
+const testingConnection = ref(false)
 const healthOk = ref(false)
 const healthLabel = ref('未检查')
-const statusText = ref('')
-const knowledgeCount = ref('-')
-const searchQuery = ref('退款多久能到账')
-const searchResults = ref([])
-const docTitle = ref('退款补充政策')
-const docContent = ref('大促期间退款审核时间可能延长到 3-5 个工作日。')
 const messageList = ref(null)
-const sidebarRef = ref(null)
-const monitorData = ref({ agent_stats: {}, tool_stats: {}, active_alerts: [], suggestions: [] })
-const skillsData = ref({ count: 0, skills: [], errors: [] })
-const lastResponse = ref(null)
-const lastTrace = ref(null)
-const evalData = ref(null)
-const toast = ref('')
-let toastTimer
-let messageSequence = 0
-let sidebarObserver
+const composerInput = ref(null)
+// 输入法组词状态：组词中的回车是"确认候选词"，绝不能当成发送
+const isComposing = ref(false)
 
 const currentBackend = computed(() => backendMeta(settings.backend, settings))
-const docsUrl = computed(() => `${currentBackend.value.baseUrl}/docs`)
-const userInitial = computed(() => (settings.userId || 'U').slice(0, 1).toUpperCase())
-const activeAlerts = computed(() => monitorData.value.active_alerts || [])
-const agentCount = computed(() => Object.keys(monitorData.value.agent_stats || {}).length)
-const totalRequests = computed(() => Object.values(monitorData.value.agent_stats || {}).reduce((sum, item) => sum + Number(item.total || 0), 0))
+const sendLabel = computed(() => (busy.value ? (streamActive.value ? '生成中' : '发送中') : '发送'))
 
-watch(() => settings.conversationId, persist)
+watch(() => settings.conversationId, () => persist())
+
 onMounted(() => {
-  refreshConsole()
-  updateSidebarHeight()
-  if (typeof ResizeObserver !== 'undefined') {
-    sidebarObserver = new ResizeObserver(updateSidebarHeight)
-    if (sidebarRef.value) sidebarObserver.observe(sidebarRef.value)
-  }
-  window.addEventListener('resize', updateSidebarHeight)
+  checkHealth()
+  autoFocus()
 })
 
-onBeforeUnmount(() => {
-  sidebarObserver?.disconnect?.()
-  window.removeEventListener('resize', updateSidebarHeight)
-})
-
-function persist() { saveSettings(settings) }
-
-function updateSidebarHeight() {
-  const sidebar = sidebarRef.value
-  if (!sidebar) return
-  const rect = sidebar.getBoundingClientRect()
-  const height = Math.max(320, Math.floor(rect.height))
-  sidebar.style.setProperty('--sidebar-height', `${height}px`)
+function persist() {
+  saveSettings(settings)
 }
 
-function switchBackend(type) {
-  settings.backend = type
+function autoFocus() {
+  nextTick(() => composerInput.value?.focus())
+}
+
+function onEndpointChange() {
   persist()
-  healthOk.value = false
-  healthLabel.value = '未检查'
-  messages.value = []
-  searchResults.value = []
-  lastResponse.value = null
-  lastTrace.value = null
-  refreshConsole()
+  checkHealth()
 }
 
-async function refreshConsole() {
-  await Promise.allSettled([checkHealth(), loadStats(), loadMonitor(), loadSkills()])
+function useSuggestion(text) {
+  draft.value = text
+  sendMessage()
+}
+
+function onCompositionStart() {
+  isComposing.value = true
+}
+
+function onCompositionEnd() {
+  isComposing.value = false
+}
+
+/**
+ * 回车发送。
+ *
+ * 中文/日文输入法组词时按回车是用来"确认候选词"的，早期实现直接把它当成了发送，
+ * 会出现「已写好的内容被发出去、正在组词的字母却留在输入框」的问题。三种情况必须放过：
+ *   1. compositionstart 到 compositionend 之间（isComposing 标记）
+ *   2. 事件自身带 isComposing
+ *   3. keyCode 229（部分浏览器/输入法不设置 isComposing）
+ *
+ * 注意这些分支里不能 preventDefault，否则会打断输入法对候选词的确认。
+ */
+function onComposerKeydown(event) {
+  if (isComposing.value || event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  sendMessage()
+}
+
+/** 输入框随内容增高，最多 200px 后内部滚动。 */
+function autoGrow(event) {
+  const el = event.target
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+}
+
+function resetComposerHeight() {
+  const el = composerInput.value
+  if (el) el.style.height = 'auto'
+}
+
+function roleLabel(item) {
+  if (item.role === 'user') return '你'
+  if (item.role === 'system') return '系统'
+  return 'EchoMind 客服'
+}
+
+/**
+ * 回答下方的标签文案。
+ *
+ * 目前只展示耗时：意图 / 路由 Agent / 流式 / RAG / 转人工 / LLM 调用次数属于调试字段，
+ * 需要时把 SHOW_DEBUG_META 改成 true 即可整组恢复，不必改动其它逻辑。
+ * 失败信息不受开关影响——用户没拿到正常回答时必须能看见原因。
+ */
+const SHOW_DEBUG_META = false
+
+function metaText(result) {
+  const parts = [
+    result.latencyMs ? `${Math.round(result.latencyMs)} ms` : '',
+    result.error ? `流式中断：${result.error}` : ''
+  ]
+  if (SHOW_DEBUG_META) {
+    parts.unshift(
+      result.primaryAgent || result.agentType || '',
+      result.intent || '',
+      result.streamed ? '流式' : '',
+      result.knowledgeUsed ? 'RAG' : '',
+      result.escalated ? '转人工' : '',
+      result.llmCalls ? `LLM ${result.llmCalls} 次` : '',
+      result.historyDroppedByThreshold ? `丢弃历史 ${result.historyDroppedByThreshold} 条` : ''
+    )
+  }
+  return parts.filter(Boolean).join(' · ')
+}
+
+function metaChips(meta) {
+  return String(meta).split(' · ').filter(Boolean)
+}
+
+function pushSystemMessage(content) {
+  messages.value.push({ id: crypto.randomUUID(), role: 'system', content })
+}
+
+/** 手动新建会话：清空会话标识与消息列表（设计文档 §4.2 方式一）。 */
+function startNewSession() {
+  resetSession(settings)
+  messages.value = []
+  persist()
+  pushSystemMessage('已开启新会话，不再携带上一话题的摘要与历史')
+  scrollToBottom()
+  autoFocus()
+}
+
+/** 空闲超时自动切会话（设计文档 §4.2 方式二）。 */
+function rotateSessionIfIdle() {
+  if (!shouldRotateSession(settings)) return false
+  const idleMinutes = Math.round(idleTimeoutMs(settings) / 60000)
+  resetSession(settings)
+  persist()
+  pushSystemMessage(`距上条消息已超过 ${idleMinutes} 分钟，本轮提问自动开启新会话（不携带旧话题记忆）。`)
+  return true
+}
+
+function scrollToBottom(smooth = true) {
+  nextTick(() => {
+    const el = messageList.value
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  })
+}
+
+/** 会话收尾标记：只清会话标识，由下次发送时重新生成 conv_id。 */
+function applySessionClosed(result) {
+  if (!result.sessionClosed) return
+  resetSession(settings)
+  persist()
+  pushSystemMessage('后端识别到本轮会话已收尾，下次提问将开启新会话')
+}
+
+async function sendMessage() {
+  // 组词中一律不发送：回车之外的入口（表单提交等）也走同一道闸
+  if (isComposing.value) return
+  const content = draft.value.trim()
+  if (!content || busy.value) return
+
+  rotateSessionIfIdle()
+  messages.value.push({ id: crypto.randomUUID(), role: 'user', content })
+  draft.value = ''
+  resetComposerHeight()
+  busy.value = true
+  scrollToBottom()
+
+  settings.lastMessageAt = Date.now()
+  persist()
+
+  const useStream = settings.backend === 'python' && supportsStreaming(settings.backend, settings)
+
+  try {
+    const result = useStream
+      ? await sendStreaming(content)
+      : await requestChat(settings.backend, settings, content)
+    // 非流式路径的会话标识只在响应里下发：首轮必须回填，否则多轮记忆每轮都会被重置
+    if (result.conversationId && !settings.conversationId) {
+      settings.conversationId = result.conversationId
+      persist()
+    }
+    applySessionClosed(result)
+  } catch (error) {
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: error.message,
+      meta: '请求失败'
+    })
+  } finally {
+    busy.value = false
+    streamActive.value = false
+    scrollToBottom()
+    autoFocus()
+  }
+}
+
+/**
+ * L7 流式发送：先占位一条 assistant 消息，delta 到达时增量渲染。
+ * 流式完全失败（没有拿到任何内容）时自动降级为非流式请求，保证用户不会看到空回答。
+ */
+async function sendStreaming(content) {
+  const placeholder = reactive({
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content: '',
+    // 首字到达前不显示任何标签，只有阶段文案（下面是计时），避免一上来就冒调试字段
+    meta: '',
+    streaming: true,
+    phase: '正在连接…'
+  })
+  messages.value.push(placeholder)
+  streamActive.value = true
+  let deltaCount = 0
+  // 是否已收到 meta / route：只用来决定等待期文案，不再当作标签内容
+  let recognized = false
+  const startedAt = Date.now()
+
+  // 等待期可见化：模型"思考"或上游排队时，前端一直在走计时与阶段文案，
+  // 不让用户面对一个静止的省略号（实测上游首字可能波动到数秒）。
+  let firstDeltaAt = 0
+  const ticker = setInterval(() => {
+    if (!placeholder.streaming) return
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
+    if (!firstDeltaAt) {
+      placeholder.phase = recognized
+        ? `已识别问题，等待模型响应… ${elapsed}s`
+        : `正在理解你的问题… ${elapsed}s`
+    }
+  }, 100)
+
+  try {
+    const result = await requestChatStream(settings.backend, settings, content, {
+      onMeta: (data) => {
+        if (data?.conv_id && !settings.conversationId) {
+          settings.conversationId = data.conv_id
+          persist()
+        }
+        recognized = true
+        placeholder.phase = '已识别问题，正在组织回答…'
+      },
+      onRoute: (data) => {
+        recognized = true
+        placeholder.phase = `已路由到 ${data?.primary_agent || '客服'}，正在组织回答…`
+      },
+      onDelta: (piece) => {
+        if (!firstDeltaAt) {
+          firstDeltaAt = Date.now()
+          // 流式过程中唯一展示的指标：首字耗时
+          placeholder.meta = `${((firstDeltaAt - startedAt) / 1000).toFixed(1)}s 首字`
+        }
+        deltaCount += 1
+        placeholder.content += piece
+        if (deltaCount % 8 === 0) scrollToBottom(false)
+      }
+    })
+
+    placeholder.streaming = false
+    clearInterval(ticker)
+    if (!placeholder.content) placeholder.content = result.response
+    placeholder.meta = metaText(result)
+    return result
+  } catch (error) {
+    clearInterval(ticker)
+    placeholder.streaming = false
+    if (!placeholder.content) {
+      // 一个 delta 都没拿到：整条降级为非流式
+      messages.value = messages.value.filter((item) => item.id !== placeholder.id)
+      streamActive.value = false
+      const fallback = await requestChat(settings.backend, settings, content)
+      messages.value.push({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: fallback.response,
+        meta: metaText(fallback)
+      })
+      return fallback
+    }
+    // 已经流出一部分：保留内容，只标注中断原因
+    placeholder.meta = `流式中断：${error.message}`
+    throw error
+  }
 }
 
 async function checkHealth() {
+  testingConnection.value = true
   try {
     const data = await requestHealth(settings.backend, settings)
     healthOk.value = data.status === 'ok'
     healthLabel.value = data.status || 'ok'
-    statusText.value = JSON.stringify(data, null, 2)
   } catch (error) {
     healthOk.value = false
     healthLabel.value = '不可用'
-    statusText.value = error.message
-
-    // When the saved backend is stale, try the other configured service once.
-    const fallback = settings.backend === 'python' ? 'java' : 'python'
-    if (settings.backend !== fallback) {
-      try {
-        const fallbackData = await requestHealth(fallback, settings)
-        if (fallbackData.status === 'ok') {
-          settings.backend = fallback
-          persist()
-          healthOk.value = true
-          healthLabel.value = fallbackData.status
-          statusText.value = JSON.stringify(fallbackData, null, 2)
-          await Promise.allSettled([loadStats(), loadMonitor(), loadSkills()])
-        }
-      } catch {
-        // Keep the original error visible when both services are unavailable.
-      }
-    }
-  }
-}
-
-async function loadStats() {
-  try {
-    const data = await requestKnowledgeStats(settings.backend, settings)
-    knowledgeCount.value = data.total_chunks ?? data.totalChunks ?? '-'
-  } catch {
-    knowledgeCount.value = '-'
-  }
-}
-
-async function loadMonitor() {
-  try {
-    monitorData.value = await requestMonitor(settings.backend, settings)
-  } catch {
-    monitorData.value = { agent_stats: {}, tool_stats: {}, active_alerts: [], suggestions: [] }
-  }
-}
-
-async function loadSkills() {
-  try {
-    skillsData.value = await requestSkills(settings.backend, settings)
-  } catch {
-    skillsData.value = { count: 0, skills: [], errors: [] }
-  }
-}
-
-async function reloadSkillSet() {
-  busy.value = true
-  try {
-    skillsData.value = await reloadSkills(settings.backend, settings)
-    showToast('Skills 已重新加载')
-  } catch (error) {
-    statusText.value = error.message
-    showToast('Skills 加载失败')
-  } finally { busy.value = false }
-}
-
-async function sendMessage() {
-  const content = draft.value.trim()
-  if (!content || busy.value) return
-  messages.value.push({ id: createMessageId(), role: 'user', content })
-  draft.value = ''
-  busy.value = true
-  try {
-    const response = await requestChat(settings.backend, settings, content)
-    if (response.conversationId && !settings.conversationId) {
-      settings.conversationId = response.conversationId
-      persist()
-    }
-    lastResponse.value = response
-    lastTrace.value = await loadToolTrace(response.requestId)
-    const meta = [response.intent, response.primaryAgent || response.agentType, response.knowledgeUsed ? 'RAG' : '', response.escalated ? '转人工' : ''].filter(Boolean).join(' · ')
-    messages.value.push({ id: createMessageId(), role: 'assistant', content: response.response, meta, trace: lastTrace.value?.trace || null })
-    await loadMonitor()
-  } catch (error) {
-    messages.value.push({ id: createMessageId(), role: 'assistant', content: error.message, meta: '请求失败' })
   } finally {
-    busy.value = false
-    await nextTick()
-    messageList.value?.scrollTo({ top: messageList.value.scrollHeight, behavior: 'smooth' })
+    testingConnection.value = false
   }
-}
-
-function usePrompt(prompt) { draft.value = prompt }
-
-function clearConversation() {
-  messages.value = []
-  lastResponse.value = null
-  lastTrace.value = null
-  settings.conversationId = ''
-  persist()
-}
-
-async function searchKnowledge() {
-  busy.value = true
-  try {
-    const data = await requestSearch(settings.backend, settings, searchQuery.value, 5)
-    searchResults.value = data.results || []
-    showToast(`检索完成，返回 ${searchResults.value.length} 条结果`)
-  } catch (error) {
-    statusText.value = error.message
-    showToast('检索失败，请检查连接')
-  } finally { busy.value = false }
-}
-
-async function submitKnowledge() {
-  busy.value = true
-  try {
-    const data = await addKnowledge(settings.backend, settings, [{ title: docTitle.value.trim(), content: docContent.value.trim() }])
-    statusText.value = JSON.stringify(data, null, 2)
-    await loadStats()
-    showToast('文档已添加')
-  } catch (error) {
-    statusText.value = error.message
-    showToast('文档导入失败')
-  } finally { busy.value = false }
-}
-
-async function handleUpload(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  busy.value = true
-  try {
-    const data = await uploadKnowledge(settings.backend, settings, file)
-    statusText.value = JSON.stringify(data, null, 2)
-    await loadStats()
-    showToast(`${file.name} 导入成功`)
-  } catch (error) {
-    statusText.value = error.message
-    showToast('文件导入失败')
-  } finally { busy.value = false }
-}
-
-async function runEvaluation() {
-  busy.value = true
-  try {
-    evalData.value = await requestEvaluation(settings.backend, settings)
-    showToast('评测完成')
-  } catch (error) {
-    statusText.value = error.message
-    showToast('评测运行失败')
-  } finally { busy.value = false }
-}
-
-async function loadToolTrace(requestId) {
-  try {
-    return await requestToolTrace(settings.backend, settings, requestId)
-  } catch {
-    return null
-  }
-}
-
-function formatPercent(value) {
-  const number = Number(value || 0)
-  return `${(number <= 1 ? number * 100 : number).toFixed(1)}%`
-}
-
-function formatJson(value) {
-  try {
-    return JSON.stringify(value ?? {}, null, 2)
-  } catch {
-    return String(value ?? '')
-  }
-}
-
-function createMessageId() {
-  messageSequence += 1
-  return `message-${Date.now()}-${messageSequence}`
-}
-
-function showToast(message) {
-  toast.value = message
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toast.value = '' }, 2600)
 }
 </script>
